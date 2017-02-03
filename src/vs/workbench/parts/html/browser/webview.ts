@@ -14,19 +14,16 @@ import { addDisposableListener, addClass } from 'vs/base/browser/dom';
 import { isLightTheme, isDarkTheme } from 'vs/platform/theme/common/themes';
 import { CommandsRegistry } from 'vs/platform/commands/common/commands';
 import { MenuRegistry } from 'vs/platform/actions/common/actions';
+import { IColorTheme } from 'vs/workbench/services/themes/common/themeService';
 
 declare interface WebviewElement extends HTMLElement {
 	src: string;
 	autoSize: 'on';
 	nodeintegration: 'on';
-	disablewebsecurity: 'on';
+	preload: string;
 
-	getURL(): string;
-	getTitle(): string;
-	executeJavaScript(code: string, userGesture?: boolean, callback?: (result: any) => any);
 	send(channel: string, ...args: any[]);
 	openDevTools(): any;
-	closeDevTools(): any;
 }
 
 CommandsRegistry.registerCommand('_webview.openDevTools', function () {
@@ -47,6 +44,10 @@ MenuRegistry.addCommand({
 
 type ApiThemeClassName = 'vscode-light' | 'vscode-dark' | 'vscode-high-contrast';
 
+export interface WebviewOptions {
+	nodeintegration: boolean;
+}
+
 export default class Webview {
 
 	private _webview: WebviewElement;
@@ -55,7 +56,7 @@ export default class Webview {
 	private _onDidClickLink = new Emitter<URI>();
 	private _onDidLoadContent = new Emitter<{ stats: any }>();
 
-	constructor(parent: HTMLElement, private _styleElement: Element) {
+	constructor(parent: HTMLElement, private _styleElement: Element, options: WebviewOptions) {
 		this._webview = <any>document.createElement('webview');
 
 		this._webview.style.width = '100%';
@@ -63,7 +64,11 @@ export default class Webview {
 		this._webview.style.outline = '0';
 		this._webview.style.opacity = '0';
 		this._webview.autoSize = 'on';
-		this._webview.nodeintegration = 'on';
+		if (options.nodeintegration) {
+			this._webview.nodeintegration = 'on';
+		}
+
+		this._webview.preload = require.toUrl('./webview-pre.js');
 		this._webview.src = require.toUrl('./webview.html');
 
 		this._ready = new TPromise<this>(resolve => {
@@ -117,10 +122,6 @@ export default class Webview {
 		}
 	}
 
-	get domNode(): HTMLElement {
-		return this._webview;
-	}
-
 	get onDidClickLink(): Event<URI> {
 		return this._onDidClickLink.event;
 	}
@@ -148,7 +149,12 @@ export default class Webview {
 		this._send('focus');
 	}
 
-	style(themeId: string): void {
+	public sendMessage(data: any): void {
+		this._send('message', data);
+	}
+
+	style(theme: IColorTheme): void {
+		let themeId = theme.id;
 		const {color, backgroundColor, fontFamily, fontWeight, fontSize} = window.getComputedStyle(this._styleElement);
 
 		let value = `

@@ -6,8 +6,8 @@
 
 import { localize } from 'vs/nls';
 import * as strings from 'vs/base/common/strings';
-import { IReadOnlyModel, IPosition } from 'vs/editor/common/editorCommon';
-import { ISuggestion } from 'vs/editor/common/modes';
+import { ITokenizedModel, IPosition } from 'vs/editor/common/editorCommon';
+import { ISuggestion, LanguageIdentifier, LanguageId } from 'vs/editor/common/modes';
 import { Registry } from 'vs/platform/platform';
 
 export const Extensions = {
@@ -19,17 +19,17 @@ export interface ISnippetsRegistry {
 	/**
 	 * Register a snippet to the registry.
 	 */
-	registerSnippets(modeId: string, snippets: ISnippet[], owner?: string): void;
+	registerSnippets(languageIdentifier: LanguageIdentifier, snippets: ISnippet[], owner?: string): void;
 
 	/**
 	 * Visit all snippets
 	 */
-	visitSnippets(modeId: string, accept: (snippet: ISnippet) => void): void;
+	visitSnippets(languageId: LanguageId, accept: (snippet: ISnippet) => void): void;
 
 	/**
 	 * Get all snippet completions for the given position
 	 */
-	getSnippetCompletions(model: IReadOnlyModel, position: IPosition): ISuggestion[];
+	getSnippetCompletions(model: ITokenizedModel, position: IPosition): ISuggestion[];
 
 }
 
@@ -47,18 +47,18 @@ interface ISnippetSuggestion extends ISuggestion {
 
 class SnippetsRegistry implements ISnippetsRegistry {
 
-	private _snippets: { [modeId: string]: { [owner: string]: ISnippet[] } } = Object.create(null);
+	private _snippets: { [owner: string]: ISnippet[] }[] = [];
 
-	public registerSnippets(modeId: string, snippets: ISnippet[], owner = ''): void {
-		let snippetsByMode = this._snippets[modeId];
+	public registerSnippets(languageIdentifier: LanguageIdentifier, snippets: ISnippet[], owner = ''): void {
+		let snippetsByMode = this._snippets[languageIdentifier.id];
 		if (!snippetsByMode) {
-			this._snippets[modeId] = snippetsByMode = {};
+			this._snippets[languageIdentifier.id] = snippetsByMode = {};
 		}
 		snippetsByMode[owner] = snippets;
 	}
 
-	public visitSnippets(modeId: string, accept: (snippet: ISnippet) => boolean): void {
-		let snippetsByMode = this._snippets[modeId];
+	public visitSnippets(languageId: LanguageId, accept: (snippet: ISnippet) => boolean): void {
+		let snippetsByMode = this._snippets[languageId];
 		if (snippetsByMode) {
 			for (let s in snippetsByMode) {
 				let result = snippetsByMode[s].every(accept);
@@ -69,10 +69,10 @@ class SnippetsRegistry implements ISnippetsRegistry {
 		}
 	}
 
-	public getSnippetCompletions(model: IReadOnlyModel, position: IPosition): ISuggestion[] {
-		const modeId = model.getModeId();
-		if (!this._snippets[modeId]) {
-			return;
+	public getSnippetCompletions(model: ITokenizedModel, position: IPosition): ISuggestion[] {
+		const languageId = model.getLanguageIdAtPosition(position.lineNumber, position.column);
+		if (!this._snippets[languageId]) {
+			return undefined;
 		}
 
 		const result: ISnippetSuggestion[] = [];
@@ -81,7 +81,7 @@ class SnippetsRegistry implements ISnippetsRegistry {
 		const currentWord = word ? word.word.substring(0, position.column - word.startColumn).toLowerCase() : '';
 		const currentFullWord = getNonWhitespacePrefix(model, position).toLowerCase();
 
-		this.visitSnippets(modeId, s => {
+		this.visitSnippets(languageId, s => {
 			let overwriteBefore: number;
 			if (currentWord.length === 0 && currentFullWord.length === 0) {
 				// if there's no prefix, only show snippets at the beginning of the line, or after a whitespace

@@ -44,6 +44,7 @@ export interface ICodeEditorHelper {
 	getVerticalOffsetForPosition(lineNumber: number, column: number): number;
 	delegateVerticalScrollbarMouseDown(browserEvent: MouseEvent): void;
 	getOffsetForColumn(lineNumber: number, column: number): number;
+	getTargetAtClientPoint(clientX: number, clientY: number): IMouseTarget;
 }
 
 /**
@@ -57,7 +58,6 @@ export interface IView extends IDisposable {
 	createOverviewRuler(cssClassName: string, minimumHeight: number, maximumHeight: number): IOverviewRuler;
 	getCodeEditorHelper(): ICodeEditorHelper;
 
-	getCenteredRangeInViewport(): Range;
 	/**
 	 * Returns the range of lines in the view port which are completely visible.
 	 */
@@ -65,7 +65,6 @@ export interface IView extends IDisposable {
 
 	change(callback: (changeAccessor: IViewZoneChangeAccessor) => any): boolean;
 	getWhitespaces(): editorCommon.IEditorWhitespace[];
-	renderOnce(callback: () => any): any;
 
 	render(now: boolean, everything: boolean): void;
 	setAriaActiveDescendant(id: string): void;
@@ -154,6 +153,7 @@ export const ClassNames = {
 	OVERFLOWING_CONTENT_WIDGETS: 'overflowingContentWidgets',
 	OVERLAY_WIDGETS: 'overlayWidgets',
 	MARGIN_VIEW_OVERLAYS: 'margin-view-overlays',
+	MARGIN: 'margin',
 	LINE_NUMBERS: 'line-numbers',
 	GLYPH_MARGIN: 'glyph-margin',
 	SCROLL_DECORATION: 'scroll-decoration',
@@ -211,6 +211,10 @@ export interface IViewZone {
 	 * The dom node of the view zone
 	 */
 	domNode: HTMLElement;
+	/**
+	 * An optional dom node for the view zone that will be placed in the margin area.
+	 */
+	marginDomNode?: HTMLElement;
 	/**
 	 * Callback which gives the relative top of the view zone as it appears (taking scrolling into account).
 	 */
@@ -517,6 +521,14 @@ export interface ICodeEditor extends editorCommon.ICommonCodeEditor {
 	 * Get the vertical position (top offset) for the position w.r.t. to the first line.
 	 */
 	getTopForPosition(lineNumber: number, column: number): number;
+
+	/**
+	 * Get the hit test target at coordinates `clientX` and `clientY`.
+	 * The coordinates are relative to the top-left of the viewport.
+	 *
+	 * @returns Hit test target or null if the coordinates fall outside the editor or the editor has no model.
+	 */
+	getTargetAtClientPoint(clientX: number, clientY: number): IMouseTarget;
 
 	/**
 	 * Get the visible position for `position`.

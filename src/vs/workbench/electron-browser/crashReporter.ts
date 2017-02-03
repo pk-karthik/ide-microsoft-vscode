@@ -13,8 +13,8 @@ import { IWindowsService } from 'vs/platform/windows/common/windows';
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
 import { Registry } from 'vs/platform/platform';
 import { crashReporter } from 'electron';
-import product from 'vs/platform/product';
-import pkg from 'vs/platform/package';
+import product from 'vs/platform/node/product';
+import pkg from 'vs/platform/node/package';
 
 const TELEMETRY_SECTION_ID = 'telemetry';
 
@@ -31,7 +31,7 @@ configurationRegistry.registerConfiguration({
 	'properties': {
 		'telemetry.enableCrashReporter': {
 			'type': 'boolean',
-			'description': nls.localize('telemetry.enableCrashReporting', "Enable crash reports to be sent to Microsoft.\n\t// This option requires restart to take effect."),
+			'description': nls.localize('telemetry.enableCrashReporting', "Enable crash reports to be sent to Microsoft.\nThis option requires restart to take effect."),
 			'default': true
 		}
 	}

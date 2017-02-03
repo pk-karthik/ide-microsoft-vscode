@@ -37,11 +37,6 @@ export class Disposable {
 	}
 }
 
-export interface EditorOptions {
-	tabSize: number | string;
-	insertSpaces: boolean | string;
-}
-
 export class Position {
 
 	static Min(...positions: Position[]): Position {
@@ -284,7 +279,7 @@ export class Range {
 			// this happens when there is no overlap:
 			// |-----|
 			//          |----|
-			return;
+			return undefined;
 		}
 		return new Range(start, end);
 	}
@@ -470,7 +465,7 @@ export class Uri extends URI { }
 export class WorkspaceEdit {
 
 	private _values: [Uri, TextEdit[]][] = [];
-	private _index: { [uri: string]: number } = Object.create(null);
+	private _index = new Map<string, number>();
 
 	replace(uri: Uri, range: Range, newText: string): void {
 		let edit = new TextEdit(range, newText);
@@ -491,21 +486,21 @@ export class WorkspaceEdit {
 	}
 
 	has(uri: Uri): boolean {
-		return typeof this._index[uri.toString()] !== 'undefined';
+		return this._index.has(uri.toString());
 	}
 
 	set(uri: Uri, edits: TextEdit[]): void {
-		let idx = this._index[uri.toString()];
+		const idx = this._index.get(uri.toString());
 		if (typeof idx === 'undefined') {
 			let newLen = this._values.push([uri, edits]);
-			this._index[uri.toString()] = newLen - 1;
+			this._index.set(uri.toString(), newLen - 1);
 		} else {
 			this._values[idx][1] = edits;
 		}
 	}
 
 	get(uri: Uri): TextEdit[] {
-		let idx = this._index[uri.toString()];
+		let idx = this._index.get(uri.toString());
 		return typeof idx !== 'undefined' && this._values[idx][1];
 	}
 
@@ -519,6 +514,88 @@ export class WorkspaceEdit {
 
 	toJSON(): any {
 		return this._values;
+	}
+}
+
+export class SnippetString {
+
+	static isSnippetString(thing: any): thing is SnippetString {
+		if (thing instanceof SnippetString) {
+			return true;
+		}
+		if (!thing) {
+			return false;
+		}
+		return typeof (<SnippetString>thing).value === 'string';
+	}
+
+	private static _escape(value: string): string {
+		return value.replace(/\$|}|\\/g, '\\$&');
+	}
+
+	private _tabstop: number = 1;
+
+	value: string;
+
+	constructor(value?: string) {
+		this.value = value || '';
+	}
+
+	appendText(string: string): SnippetString {
+		this.value += SnippetString._escape(string);
+		return this;
+	}
+
+	appendTabstop(number: number = this._tabstop++): SnippetString {
+		this.value += '$';
+		this.value += number;
+		return this;
+	}
+
+	appendPlaceholder(value: string | ((snippet: SnippetString) => any), number: number = this._tabstop++): SnippetString {
+
+		if (typeof value === 'function') {
+			const nested = new SnippetString();
+			nested._tabstop = this._tabstop;
+			value(nested);
+			this._tabstop = nested._tabstop;
+			value = nested.value;
+		} else {
+			value = SnippetString._escape(value);
+		}
+
+		this.value += '${';
+		this.value += number;
+		this.value += ':';
+		this.value += value;
+		this.value += '}';
+
+		return this;
+	}
+
+	appendVariable(name: string, defaultValue?: string | ((snippet: SnippetString) => any)): SnippetString {
+
+		if (typeof defaultValue === 'function') {
+			const nested = new SnippetString();
+			nested._tabstop = this._tabstop;
+			defaultValue(nested);
+			this._tabstop = nested._tabstop;
+			defaultValue = nested.value;
+
+		} else if (typeof defaultValue === 'string') {
+			defaultValue = defaultValue.replace(/\$|}/g, '\\$&');
+		}
+
+		this.value += '${';
+		this.value += name;
+		if (defaultValue) {
+			this.value += ':';
+			this.value += defaultValue;
+		}
+		this.value += '}';
+
+
+		return this;
 	}
 }
 
@@ -713,7 +790,7 @@ export class CodeLens {
 export class ParameterInformation {
 
 	label: string;
-	documentation: string;
+	documentation?: string;
 
 	constructor(label: string, documentation?: string) {
 		this.label = label;
@@ -724,7 +801,7 @@ export class ParameterInformation {
 export class SignatureInformation {
 
 	label: string;
-	documentation: string;
+	documentation?: string;
 	parameters: ParameterInformation[];
 
 	constructor(label: string, documentation?: string) {
@@ -763,7 +840,8 @@ export enum CompletionItemKind {
 	Snippet = 14,
 	Color = 15,
 	File = 16,
-	Reference = 17
+	Reference = 17,
+	Folder = 18
 }
 
 export class CompletionItem {
@@ -774,7 +852,8 @@ export class CompletionItem {
 	documentation: string;
 	sortText: string;
 	filterText: string;
-	insertText: string;
+	insertText: string | SnippetString;
+	range: Range;
 	textEdit: TextEdit;
 	additionalTextEdits: TextEdit[];
 	command: vscode.Command;
@@ -800,7 +879,7 @@ export class CompletionItem {
 
 export class CompletionList {
 
-	isIncomplete: boolean;
+	isIncomplete?: boolean;
 
 	items: vscode.CompletionItem[];
 
@@ -841,7 +920,8 @@ export enum TextDocumentSaveReason {
 export enum TextEditorRevealType {
 	Default = 0,
 	InCenter = 1,
-	InCenterIfOutsideViewport = 2
+	InCenterIfOutsideViewport = 2,
+	AtTop = 3
 }
 
 export enum TextEditorSelectionChangeKind {
@@ -857,6 +937,7 @@ export namespace TextEditorSelectionChangeKind {
 			case 'mouse': return TextEditorSelectionChangeKind.Mouse;
 			case 'api': return TextEditorSelectionChangeKind.Command;
 		}
+		return undefined;
 	}
 }
 

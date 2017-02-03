@@ -29,11 +29,12 @@ export interface IWindowsChannel extends IChannel {
 	call(command: 'maximizeWindow', arg: number): TPromise<void>;
 	call(command: 'unmaximizeWindow', arg: number): TPromise<void>;
 	call(command: 'setDocumentEdited', arg: [number, boolean]): TPromise<void>;
-	call(command: 'toggleMenuBar', arg: number): TPromise<void>;
-	call(command: 'windowOpen', arg: [string[], boolean]): TPromise<void>;
+	call(command: 'quit'): TPromise<void>;
+	call(command: 'openWindow', arg: [string[], { forceNewWindow?: boolean, forceReuseWindow?: boolean }]): TPromise<void>;
 	call(command: 'openNewWindow'): TPromise<void>;
 	call(command: 'showWindow', arg: number): TPromise<void>;
 	call(command: 'getWindows'): TPromise<{ id: number; path: string; title: string; }[]>;
+	call(command: 'getWindowCount'): TPromise<number>;
 	call(command: 'log', arg: [string, string[]]): TPromise<void>;
 	call(command: 'closeExtensionHostWindow', arg: string): TPromise<void>;
 	call(command: 'showItemInFolder', arg: string): TPromise<void>;
@@ -73,17 +74,19 @@ export class WindowsChannel implements IWindowsChannel {
 			case 'maximizeWindow': return this.service.maximizeWindow(arg);
 			case 'unmaximizeWindow': return this.service.unmaximizeWindow(arg);
 			case 'setDocumentEdited': return this.service.setDocumentEdited(arg[0], arg[1]);
-			case 'toggleMenuBar': return this.service.toggleMenuBar(arg);
-			case 'windowOpen': return this.service.windowOpen(arg[0], arg[1]);
+			case 'openWindow': return this.service.openWindow(arg[0], arg[1]);
 			case 'openNewWindow': return this.service.openNewWindow();
 			case 'showWindow': return this.service.showWindow(arg);
 			case 'getWindows': return this.service.getWindows();
+			case 'getWindowCount': return this.service.getWindowCount();
+			case 'quit': return this.service.quit();
 			case 'log': return this.service.log(arg[0], arg[1]);
 			case 'closeExtensionHostWindow': return this.service.closeExtensionHostWindow(arg);
 			case 'showItemInFolder': return this.service.showItemInFolder(arg);
 			case 'openExternal': return this.service.openExternal(arg);
 			case 'startCrashReporter': return this.service.startCrashReporter(arg);
 		}
+		return undefined;
 	}
 }
 
@@ -167,12 +170,12 @@ export class WindowsChannelClient implements IWindowsService {
 		return this.channel.call('setDocumentEdited', [windowId, flag]);
 	}
 
-	toggleMenuBar(windowId: number): TPromise<void> {
-		return this.channel.call('toggleMenuBar', windowId);
+	quit(): TPromise<void> {
+		return this.channel.call('quit');
 	}
 
-	windowOpen(paths: string[], forceNewWindow?: boolean): TPromise<void> {
-		return this.channel.call('windowOpen', [paths, forceNewWindow]);
+	openWindow(paths: string[], options?: { forceNewWindow?: boolean, forceReuseWindow?: boolean }): TPromise<void> {
+		return this.channel.call('openWindow', [paths, options]);
 	}
 
 	openNewWindow(): TPromise<void> {
@@ -185,6 +188,10 @@ export class WindowsChannelClient implements IWindowsService {
 
 	getWindows(): TPromise<{ id: number; path: string; title: string; }[]> {
 		return this.channel.call('getWindows');
+	}
+
+	getWindowCount(): TPromise<number> {
+		return this.channel.call('getWindowCount');
 	}
 
 	log(severity: string, ...messages: string[]): TPromise<void> {

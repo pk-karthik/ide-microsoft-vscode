@@ -24,7 +24,6 @@ export interface IWindowsService {
 	reloadWindow(windowId: number): TPromise<void>;
 	openDevTools(windowId: number): TPromise<void>;
 	toggleDevTools(windowId: number): TPromise<void>;
-	// TODO@joao: rename, shouldn't this be closeWindow?
 	closeFolder(windowId: number): TPromise<void>;
 	toggleFullScreen(windowId: number): TPromise<void>;
 	setRepresentedFilename(windowId: number, fileName: string): TPromise<void>;
@@ -36,14 +35,14 @@ export interface IWindowsService {
 	maximizeWindow(windowId: number): TPromise<void>;
 	unmaximizeWindow(windowId: number): TPromise<void>;
 	setDocumentEdited(windowId: number, flag: boolean): TPromise<void>;
-	toggleMenuBar(windowId: number): TPromise<void>;
+	quit(): TPromise<void>;
 
 	// Global methods
-	// TODO@joao: rename, shouldn't this be openWindow?
-	windowOpen(paths: string[], forceNewWindow?: boolean): TPromise<void>;
+	openWindow(paths: string[], options?: { forceNewWindow?: boolean, forceReuseWindow?: boolean }): TPromise<void>;
 	openNewWindow(): TPromise<void>;
 	showWindow(windowId: number): TPromise<void>;
 	getWindows(): TPromise<{ id: number; path: string; title: string; }[]>;
+	getWindowCount(): TPromise<number>;
 	log(severity: string, ...messages: string[]): TPromise<void>;
 	// TODO@joao: what?
 	closeExtensionHostWindow(extensionDevelopmentPath: string): TPromise<void>;
@@ -78,8 +77,21 @@ export interface IWindowService {
 	getRecentlyOpen(): TPromise<{ files: string[]; folders: string[]; }>;
 	focusWindow(): TPromise<void>;
 	setDocumentEdited(flag: boolean): TPromise<void>;
-	toggleMenuBar(): TPromise<void>;
 	isMaximized(): TPromise<boolean>;
 	maximizeWindow(): TPromise<void>;
 	unmaximizeWindow(): TPromise<void>;
+}
+
+export type MenuBarVisibility = 'default' | 'visible' | 'toggle' | 'hidden';
+
+export interface IWindowSettings {
+	openFilesInNewWindow: 'on' | 'off' | 'default';
+	openFoldersInNewWindow: 'on' | 'off' | 'default';
+	reopenFolders: 'all' | 'one' | 'none';
+	restoreFullscreen: boolean;
+	zoomLevel: number;
+	titleBarStyle: 'native' | 'custom';
+	autoDetectHighContrast: boolean;
+	menuBarVisibility: MenuBarVisibility;
+	newWindowDimensions: 'default' | 'inherit' | 'maximized' | 'fullscreen';
 }

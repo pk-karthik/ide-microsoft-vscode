@@ -3,18 +3,19 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as nls from 'vs/nls';
 import uri from 'vs/base/common/uri';
 import { TPromise } from 'vs/base/common/winjs.base';
 import Event from 'vs/base/common/event';
-import severity from 'vs/base/common/severity';
+import { IJSONSchemaSnippet } from 'vs/base/common/jsonSchema';
 import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
 import { IModel as EditorIModel, IEditorContribution, IRange } from 'vs/editor/common/editorCommon';
+import { IEditor } from 'vs/platform/editor/common/editor';
 import { Position } from 'vs/editor/common/core/position';
 import { ISuggestion } from 'vs/editor/common/modes';
 import { Source } from 'vs/workbench/parts/debug/common/debugSource';
 import { Range } from 'vs/editor/common/core/range';
 import { RawContextKey, ContextKeyExpr } from 'vs/platform/contextkey/common/contextkey';
+import { IWorkbenchEditorService } from 'vs/workbench/services/editor/common/editorService';
 
 export const VIEWLET_ID = 'workbench.view.debug';
 export const REPL_ID = 'workbench.panel.repl';
@@ -29,7 +30,6 @@ export const CONTEXT_BREAKPOINT_WIDGET_VISIBLE = new RawContextKey<boolean>('bre
 
 export const EDITOR_CONTRIBUTION_ID = 'editor.contrib.debug';
 export const DEBUG_SCHEME = 'debug';
-export const NO_CONFIGURATIONS_LABEL = nls.localize('noConfigurations', "No Configurations");
 
 // raw
 
@@ -57,26 +57,18 @@ export interface ITreeElement {
 }
 
 export interface IExpressionContainer extends ITreeElement {
-	stackFrame: IStackFrame;
 	hasChildren: boolean;
-	getChildren(debugService: IDebugService): TPromise<IExpression[]>;
+	getChildren(): TPromise<IExpression[]>;
 }
 
 export interface IExpression extends ITreeElement, IExpressionContainer {
 	name: string;
 	value: string;
-	valueChanged: boolean;
+	valueChanged?: boolean;
 	type?: string;
 }
 
-export enum SessionRequestType {
-	LAUNCH,
-	ATTACH,
-	LAUNCH_NO_DEBUG
-}
-
 export interface ISession {
-	requestType: SessionRequestType;
 	stackTrace(args: DebugProtocol.StackTraceArguments): TPromise<DebugProtocol.StackTraceResponse>;
 	scopes(args: DebugProtocol.ScopesArguments): TPromise<DebugProtocol.ScopesResponse>;
 	variables(args: DebugProtocol.VariablesArguments): TPromise<DebugProtocol.VariablesResponse>;
@@ -103,9 +95,12 @@ export interface ISession {
 
 export interface IProcess extends ITreeElement {
 	name: string;
+	configuration: IConfig;
 	session: ISession;
+	isAttach(): boolean;
 	getThread(threadId: number): IThread;
 	getAllThreads(): IThread[];
+	completions(frameId: number, text: string, position: Position, overwriteBefore: number): TPromise<ISuggestion[]>;
 }
 
 export interface IThread extends ITreeElement {
@@ -170,8 +165,10 @@ export interface IStackFrame extends ITreeElement {
 	frameId: number;
 	source: Source;
 	getScopes(): TPromise<IScope[]>;
+	getMostSpecificScopes(range: IRange): TPromise<IScope[]>;
 	restart(): TPromise<any>;
-	completions(text: string, position: Position, overwriteBefore: number): TPromise<ISuggestion[]>;
+	toString(): string;
+	openInEditor(editorService: IWorkbenchEditorService, preserveFocus?: boolean, sideBySide?: boolean): TPromise<any>;
 }
 
 export interface IEnablement extends ITreeElement {
@@ -180,6 +177,7 @@ export interface IEnablement extends ITreeElement {
 
 export interface IRawBreakpoint {
 	lineNumber: number;
+	column?: number;
 	enabled?: boolean;
 	condition?: string;
 	hitCondition?: string;
@@ -188,6 +186,7 @@ export interface IRawBreakpoint {
 export interface IBreakpoint extends IEnablement {
 	uri: uri;
 	lineNumber: number;
+	column: number;
 	condition: string;
 	hitCondition: string;
 	verified: boolean;
@@ -235,13 +234,12 @@ export interface IViewModel extends ITreeElement {
 	isMultiProcessView(): boolean;
 
 	onDidFocusStackFrame: Event<IStackFrame>;
-	onDidFocusProcess: Event<IProcess>;
 	onDidSelectExpression: Event<IExpression>;
 	onDidSelectFunctionBreakpoint: Event<IFunctionBreakpoint>;
 	/**
 	 * Allows to register on change of selected debug configuration.
 	 */
-	onDidSelectConfigurationName: Event<string>;
+	onDidSelectConfiguration: Event<string>;
 }
 
 export interface IModel extends ITreeElement {
@@ -259,29 +257,26 @@ export interface IModel extends ITreeElement {
 	onDidChangeReplElements: Event<void>;
 };
 
-// service enums
+// Debug enums
 
 export enum State {
-	Disabled,
 	Inactive,
 	Initializing,
 	Stopped,
-	Running,
-	RunningNoDebug
+	Running
 }
 
-// Service config
+// Debug configuration interfaces
 
 export interface IDebugConfiguration {
 	allowBreakpointsEverywhere: boolean;
 	openExplorerOnEnd: boolean;
+	inlineValues: boolean;
 }
-
-// service interfaces
 
 export interface IGlobalConfig {
 	version: string;
-	debugServer?: number;
+	compounds: ICompound[];
 	configurations: IConfig[];
 }
 
@@ -293,12 +288,23 @@ export interface IEnvConfig {
 	preLaunchTask?: string;
 	debugServer?: number;
 	noDebug?: boolean;
+	port?: number;
 }
 
 export interface IConfig extends IEnvConfig {
 	windows?: IEnvConfig;
 	osx?: IEnvConfig;
 	linux?: IEnvConfig;
+}
+
+export interface ICompound {
+	name: string;
+	configurations: string[];
+}
+
+export interface IAdapterExecutable {
+	command?: string;
+	args?: string[];
 }
 
 export interface IRawEnvAdapter {
@@ -311,10 +317,14 @@ export interface IRawEnvAdapter {
 }
 
 export interface IRawAdapter extends IRawEnvAdapter {
+	adapterExecutableCommand?: string;
 	enableBreakpointsFor?: { languageIds: string[] };
 	configurationAttributes?: any;
+	configurationSnippets?: IJSONSchemaSnippet[];
 	initialConfigurations?: any[] | string;
-	variables: { [key: string]: string };
+	startSessionCommand?: string;
+	languages?: string[];
+	variables?: { [key: string]: string };
 	aiKey?: string;
 	win?: IRawEnvAdapter;
 	winx86?: IRawEnvAdapter;
@@ -323,28 +333,51 @@ export interface IRawAdapter extends IRawEnvAdapter {
 	linux?: IRawEnvAdapter;
 }
 
-export interface IRawBreakpointContribution {
-	language: string;
-}
-
 export interface IConfigurationManager {
 
 	/**
-	 * Returns a resolved debug configuration.
-	 * If nameOrConfig is null resolves the first configuration and returns it.
+	 * Returns a configuration with the specified name.
+	 * Returns null if there is no configuration with the specified name.
 	 */
-	getConfiguration(nameOrConfig: string | IConfig): TPromise<IConfig>;
+	getConfiguration(name: string): IConfig;
 
 	/**
-	 * Opens the launch.json file
+	 * Returns the names of all configurations and compounds.
+	 * Ignores configurations which are invalid.
 	 */
-	openConfigFile(sideBySide: boolean): TPromise<boolean>;
+	getConfigurationNames(): string[];
+
+	/**
+	 * Returns the resolved configuration.
+	 * Replaces os specific values, system variables, interactive variables.
+	 */
+	resloveConfiguration(config: IConfig): TPromise<IConfig>;
+
+	/**
+	 * Returns a compound with the specified name.
+	 * Returns null if there is no compound with the specified name.
+	 */
+	getCompound(name: string): ICompound;
+
+	/**
+	 * Opens the launch.json file. Creates if it does not exist.
+	 */
+	openConfigFile(sideBySide: boolean, type?: string): TPromise<IEditor>;
 
 	/**
 	 * Returns true if breakpoints can be set for a given editor model. Depends on mode.
 	 */
 	canSetBreakpointsIn(model: EditorIModel): boolean;
+
+	/**
+	 * Returns a "startSessionCommand" contribution for an adapter with the passed type.
+	 * If no type is specified will try to automatically pick an adapter by looking at
+	 * the active editor language and matching it against the "languages" contribution of an adapter.
+	 */
+	getStartSessionCommand(type?: string): TPromise<{ command: string, type: string }>;
 }
+
+// Debug service interfaces
 
 export const IDebugService = createDecorator<IDebugService>(DEBUG_SERVICE_ID);
 
@@ -422,16 +455,6 @@ export interface IDebugService {
 	removeReplExpressions(): void;
 
 	/**
-	 * Adds a new log to the repl. Either a string value or a dictionary (used to inspect complex objects printed to the repl).
-	 */
-	logToRepl(value: string | { [key: string]: any }, severity?: severity): void;
-
-	/**
-	 * Appends new output to the repl.
-	 */
-	appendReplOutput(value: string, severity?: severity): void;
-
-	/**
 	 * Adds a new watch expression and evaluates it against the debug adapter.
 	 */
 	addWatchExpression(name?: string): TPromise<void>;
@@ -462,6 +485,11 @@ export interface IDebugService {
 	restartProcess(process: IProcess): TPromise<any>;
 
 	/**
+	 * Deemphasizes all sources with the passed uri. Source will appear as grayed out in callstack view.
+	 */
+	deemphasizeSource(uri: uri): void;
+
+	/**
 	 * Gets the current debug model.
 	 */
 	getModel(): IModel;
@@ -470,18 +498,14 @@ export interface IDebugService {
 	 * Gets the current view model.
 	 */
 	getViewModel(): IViewModel;
-
-	/**
-	 * Opens a new or reveals an already visible editor showing the source.
-	 */
-	openOrRevealSource(sourceOrUri: Source | uri, lineNumber: number, preserveFocus: boolean, sideBySide: boolean): TPromise<any>;
 }
 
 // Editor interfaces
 export interface IDebugEditorContribution extends IEditorContribution {
-	showHover(range: Range, hoveringOver: string, focus: boolean): TPromise<void>;
+	showHover(range: Range, focus: boolean): TPromise<void>;
 	showBreakpointWidget(lineNumber: number): void;
 	closeBreakpointWidget(): void;
+	addLaunchConfiguration(): TPromise<any>;
 }
 
 // utils

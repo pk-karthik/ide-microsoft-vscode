@@ -7,7 +7,7 @@
 
 import * as assert from 'assert';
 import { setUnexpectedErrorHandler, errorHandler } from 'vs/base/common/errors';
-import { TestInstantiationService } from 'vs/test/utils/instantiationTestUtils';
+import { TestInstantiationService } from 'vs/platform/instantiation/test/common/instantiationServiceMock';
 import URI from 'vs/base/common/uri';
 import { TPromise } from 'vs/base/common/winjs.base';
 import * as types from 'vs/workbench/api/node/extHostTypes';
@@ -78,6 +78,7 @@ suite('ExtHostLanguageFeatureCommands', function () {
 			_serviceBrand: IModelService,
 			getModel(): any { return model; },
 			createModel(): any { throw new Error(); },
+			updateModel(): any { throw new Error(); },
 			setMode(): any { throw new Error(); },
 			destroyModel(): any { throw new Error(); },
 			getModels(): any { throw new Error(); },
@@ -92,7 +93,7 @@ suite('ExtHostLanguageFeatureCommands', function () {
 		extHostDocuments.$acceptModelAdd({
 			isDirty: false,
 			versionId: model.getVersionId(),
-			modeId: model.getModeId(),
+			modeId: model.getLanguageIdentifier().language,
 			url: model.uri,
 			value: {
 				EOL: model.getEOL(),
@@ -100,6 +101,7 @@ suite('ExtHostLanguageFeatureCommands', function () {
 				BOM: '',
 				length: -1,
 				containsRTL: false,
+				isBasicASCII: false,
 				options: {
 					tabSize: 4,
 					insertSpaces: true,
@@ -288,7 +290,7 @@ suite('ExtHostLanguageFeatureCommands', function () {
 
 	// --- suggest
 
-	test('Suggest, back and forth', function (done) {
+	test('Suggest, back and forth', function () {
 		disposables.push(extHost.registerCompletionItemProvider(defaultSelector, <vscode.CompletionItemProvider>{
 			provideCompletionItems(doc, pos): any {
 				let a = new types.CompletionItem('item1');
@@ -296,53 +298,54 @@ suite('ExtHostLanguageFeatureCommands', function () {
 				b.textEdit = types.TextEdit.replace(new types.Range(0, 4, 0, 8), 'foo'); // overwite after
 				let c = new types.CompletionItem('item3');
 				c.textEdit = types.TextEdit.replace(new types.Range(0, 1, 0, 6), 'foobar'); // overwite before & after
+
+				// snippet string!
 				let d = new types.CompletionItem('item4');
-				d.textEdit = types.TextEdit.replace(new types.Range(0, 1, 0, 4), ''); // overwite before
+				d.range = new types.Range(0, 1, 0, 4);// overwite before
+				d.insertText = new types.SnippetString('foo$0bar');
 				return [a, b, c, d];
 			}
 		}, []));
 
-		threadService.sync().then(() => {
-			commands.executeCommand<vscode.CompletionList>('vscode.executeCompletionItemProvider', model.uri, new types.Position(0, 4)).then(list => {
-				try {
-					assert.ok(list instanceof types.CompletionList);
-					let values = list.items;
-					assert.ok(Array.isArray(values));
-					assert.equal(values.length, 4);
-					let [first, second, third, forth] = values;
-					assert.equal(first.label, 'item1');
-					assert.equal(first.textEdit.newText, 'item1');
-					assert.equal(first.textEdit.range.start.line, 0);
-					assert.equal(first.textEdit.range.start.character, 0);
-					assert.equal(first.textEdit.range.end.line, 0);
-					assert.equal(first.textEdit.range.end.character, 4);
+		return threadService.sync().then(() => {
+			return commands.executeCommand<vscode.CompletionList>('vscode.executeCompletionItemProvider', model.uri, new types.Position(0, 4)).then(list => {
 
-					assert.equal(second.label, 'item2');
-					assert.equal(second.textEdit.newText, 'foo');
-					assert.equal(second.textEdit.range.start.line, 0);
-					assert.equal(second.textEdit.range.start.character, 4);
-					assert.equal(second.textEdit.range.end.line, 0);
-					assert.equal(second.textEdit.range.end.character, 8);
+				assert.ok(list instanceof types.CompletionList);
+				let values = list.items;
+				assert.ok(Array.isArray(values));
+				assert.equal(values.length, 4);
+				let [first, second, third, forth] = values;
+				assert.equal(first.label, 'item1');
+				assert.equal(first.textEdit.newText, 'item1');
+				assert.equal(first.textEdit.range.start.line, 0);
+				assert.equal(first.textEdit.range.start.character, 0);
+				assert.equal(first.textEdit.range.end.line, 0);
+				assert.equal(first.textEdit.range.end.character, 4);
 
-					assert.equal(third.label, 'item3');
-					assert.equal(third.textEdit.newText, 'foobar');
-					assert.equal(third.textEdit.range.start.line, 0);
-					assert.equal(third.textEdit.range.start.character, 1);
-					assert.equal(third.textEdit.range.end.line, 0);
-					assert.equal(third.textEdit.range.end.character, 6);
+				assert.equal(second.label, 'item2');
+				assert.equal(second.textEdit.newText, 'foo');
+				assert.equal(second.textEdit.range.start.line, 0);
+				assert.equal(second.textEdit.range.start.character, 4);
+				assert.equal(second.textEdit.range.end.line, 0);
+				assert.equal(second.textEdit.range.end.character, 8);
 
-					assert.equal(forth.label, 'item4');
-					assert.equal(forth.textEdit.newText, '');
-					assert.equal(forth.textEdit.range.start.line, 0);
-					assert.equal(forth.textEdit.range.start.character, 1);
-					assert.equal(forth.textEdit.range.end.line, 0);
-					assert.equal(forth.textEdit.range.end.character, 4);
-					done();
-				} catch (e) {
-					done(e);
-				}
-			}, done);
-		}, done);
+				assert.equal(third.label, 'item3');
+				assert.equal(third.textEdit.newText, 'foobar');
+				assert.equal(third.textEdit.range.start.line, 0);
+				assert.equal(third.textEdit.range.start.character, 1);
+				assert.equal(third.textEdit.range.end.line, 0);
+				assert.equal(third.textEdit.range.end.character, 6);
+
+				assert.equal(forth.label, 'item4');
+				assert.equal(forth.textEdit, undefined);
+				assert.equal(forth.range.start.line, 0);
+				assert.equal(forth.range.start.character, 1);
+				assert.equal(forth.range.end.line, 0);
+				assert.equal(forth.range.end.character, 4);
+				assert.ok(forth.insertText instanceof types.SnippetString);
+				assert.equal((<types.SnippetString>forth.insertText).value, 'foo$0bar');
+			});
+		});
 	});
 
 	test('Suggest, return CompletionList !array', function (done) {

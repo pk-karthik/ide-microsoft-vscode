@@ -23,7 +23,6 @@ export enum Position {
 }
 
 export interface ILayoutOptions {
-	forceStyleRecompute?: boolean;
 	toggleMaximizedPanel?: boolean;
 }
 
@@ -68,19 +67,9 @@ export interface IPartService {
 	isVisible(part: Parts): boolean;
 
 	/**
-	 * Checks if the activity bar is currently hidden or not
-	 */
-	isActivityBarHidden(): boolean;
-
-	/**
 	 * Set activity bar hidden or not
 	 */
 	setActivityBarHidden(hidden: boolean): void;
-
-	/**
-	 * Returns iff the custom titlebar part is visible.
-	 */
-	isTitleBarHidden(): boolean;
 
 	/**
 	 * Number of pixels (adjusted for zooming) that the title bar (if visible) pushes down the workbench contents.
@@ -88,29 +77,14 @@ export interface IPartService {
 	getTitleBarOffset(): number;
 
 	/**
-	 * Checks if the statusbar is currently hidden or not
-	 */
-	isStatusBarHidden(): boolean;
-
-	/**
-	 * Checks if the sidebar is currently hidden or not
-	 */
-	isSideBarHidden(): boolean;
-
-	/**
 	 * Set sidebar hidden or not
 	 */
-	setSideBarHidden(hidden: boolean): void;
-
-	/**
-	 * Checks if the panel part is currently hidden or not
-	 */
-	isPanelHidden(): boolean;
+	setSideBarHidden(hidden: boolean): TPromise<void>;
 
 	/**
 	 * Set panel part hidden or not
 	 */
-	setPanelHidden(hidden: boolean): void;
+	setPanelHidden(hidden: boolean): TPromise<void>;
 
 	/**
 	 * Maximizes the panel height if the panel is not already maximized.
@@ -139,7 +113,7 @@ export interface IPartService {
 	getWorkbenchElementId(): string;
 
 	/**
-	 * Enables to restore the contents of the sidebar after a restart.
+	 * Toggles the workbench in and out of zen mode - parts get hidden and window goes fullscreen.
 	 */
-	setRestoreSidebar(): void;
+	toggleZenMode(): void;
 }

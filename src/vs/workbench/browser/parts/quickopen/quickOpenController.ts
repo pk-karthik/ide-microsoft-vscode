@@ -31,7 +31,7 @@ import { IResourceInput, IEditorInput } from 'vs/platform/editor/common/editor';
 import { IModeService } from 'vs/editor/common/services/modeService';
 import { getIconClasses } from 'vs/workbench/browser/labels';
 import { IModelService } from 'vs/editor/common/services/modelService';
-import { EditorInput, getUntitledOrFileResource, IWorkbenchEditorConfiguration } from 'vs/workbench/common/editor';
+import { EditorInput, toResource, IWorkbenchEditorConfiguration } from 'vs/workbench/common/editor';
 import { WorkbenchComponent } from 'vs/workbench/common/component';
 import Event, { Emitter } from 'vs/base/common/event';
 import { IPartService } from 'vs/workbench/services/part/common/partService';
@@ -39,7 +39,7 @@ import { KeyMod } from 'vs/base/common/keyCodes';
 import { QuickOpenHandler, QuickOpenHandlerDescriptor, IQuickOpenRegistry, Extensions, EditorQuickOpenEntry } from 'vs/workbench/browser/quickopen';
 import errors = require('vs/base/common/errors');
 import { IWorkbenchEditorService } from 'vs/workbench/services/editor/common/editorService';
-import { IPickOpenEntry, IFilePickOpenEntry, IInputOptions, IQuickOpenService, IPickOptions, IShowOptions } from 'vs/workbench/services/quickopen/common/quickOpenService';
+import { IPickOpenEntry, IFilePickOpenEntry, IInputOptions, IQuickOpenService, IPickOptions, IShowOptions } from 'vs/platform/quickOpen/common/quickOpen';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { IMessageService, Severity } from 'vs/platform/message/common/message';
@@ -49,7 +49,6 @@ import { IContextKeyService, RawContextKey, IContextKey } from 'vs/platform/cont
 import { IHistoryService } from 'vs/workbench/services/history/common/history';
 
 const HELP_PREFIX = '?';
-const QUICK_OPEN_MODE = new RawContextKey<boolean>('inQuickOpen', false);
 
 interface IWorkbenchQuickOpenConfiguration {
 	workbench: {
@@ -116,7 +115,7 @@ export class QuickOpenController extends WorkbenchComponent implements IQuickOpe
 
 		this.promisesToCompleteOnHide = [];
 
-		this.inQuickOpenMode = QUICK_OPEN_MODE.bindTo(contextKeyService);
+		this.inQuickOpenMode = new RawContextKey<boolean>('inQuickOpen', false).bindTo(contextKeyService);
 
 		this._onShow = new Emitter<void>();
 		this._onHide = new Emitter<void>();
@@ -144,9 +143,13 @@ export class QuickOpenController extends WorkbenchComponent implements IQuickOpe
 		return this._onHide.event;
 	}
 
-	public quickNavigate(configuration: IQuickNavigateConfiguration, next: boolean): void {
+	public navigate(next: boolean, quickNavigate?: IQuickNavigateConfiguration): void {
 		if (this.quickOpenWidget) {
-			this.quickOpenWidget.quickNavigate(configuration, next);
+			this.quickOpenWidget.navigate(next, quickNavigate);
+		}
+
+		if (!quickNavigate && this.pickOpenWidget) {
+			this.pickOpenWidget.navigate(next); // quick-navigate is only supported in quick open, not picker
 		}
 	}
 
@@ -208,6 +211,7 @@ export class QuickOpenController extends WorkbenchComponent implements IQuickOpe
 				if (valid && item) {
 					return lastValue || options.value || '';
 				}
+				return undefined;
 			});
 		});
 	}
@@ -310,6 +314,14 @@ export class QuickOpenController extends WorkbenchComponent implements IQuickOpe
 			this.pickOpenWidget.layout(this.layoutDimensions);
 		}
 
+		// Detect cancellation while pick promise is loading
+		let cancelTriggered = false;
+		this.pickOpenWidget.setCallbacks({
+			onOk: () => { /* ignore, handle later */ },
+			onCancel: () => { cancelTriggered = true; },
+			onType: (value: string) => { /* ignore, handle later */ },
+		});
+
 		return new TPromise<IPickOpenEntry | string>((complete, error, progress) => {
 
 			// hide widget when being cancelled
@@ -323,8 +335,8 @@ export class QuickOpenController extends WorkbenchComponent implements IQuickOpe
 
 			// Resolve picks
 			picksPromise.then(picks => {
-				if (this.currentPickerToken !== currentPickerToken) {
-					return; // Return if another request came after
+				if (this.currentPickerToken !== currentPickerToken || cancelTriggered) {
+					return complete(void 0); // Return as canceled if another request came after or user canceled
 				}
 
 				picksPromiseDone = true;
@@ -334,15 +346,15 @@ export class QuickOpenController extends WorkbenchComponent implements IQuickOpe
 
 				// Model
 				const model = new QuickOpenModel();
-				const entries = picks.map(e => this.instantiationService.createInstance(PickOpenEntry, e, () => progress(e)));
+				const entries = picks.map((e, index) => this.instantiationService.createInstance(PickOpenEntry, e, index, () => progress(e)));
 				if (picks.length === 0) {
-					entries.push(this.instantiationService.createInstance(PickOpenEntry, { label: nls.localize('emptyPicks', "There are no entries to pick from") }, null));
+					entries.push(this.instantiationService.createInstance(PickOpenEntry, { label: nls.localize('emptyPicks', "There are no entries to pick from") }, 0, null));
 				}
 
 				model.setEntries(entries);
 
 				// Handlers
-				this.pickOpenWidget.setCallbacks({
+				const callbacks = {
 					onOk: () => {
 						if (picks.length === 0) {
 							return complete(null);
@@ -350,9 +362,9 @@ export class QuickOpenController extends WorkbenchComponent implements IQuickOpe
 
 						let index = -1;
 						let context: IEntryRunContext;
-						entries.forEach((entry, i) => {
+						entries.forEach(entry => {
 							if (entry.shouldRunWithContext) {
-								index = i;
+								index = entry.index;
 								context = entry.shouldRunWithContext;
 							}
 						});
@@ -406,17 +418,34 @@ export class QuickOpenController extends WorkbenchComponent implements IQuickOpe
 							});
 						}
 
+						// Sort by value
+						model.entries.sort((pickA: PickOpenEntry, pickB: PickOpenEntry) => {
+							if (!value) {
+								return pickA.index - pickB.index; // restore natural order
+							}
+
+							return QuickOpenEntry.compare(pickA, pickB, value);
+						});
+
 						this.pickOpenWidget.refresh(model, value ? { autoFocusFirstEntry: true } : autoFocus);
 					},
 					onShow: () => this.handleOnShow(true),
-					onHide: (reason) => this.handleOnHide(true, reason)
-				});
+					onHide: (reason: HideReason) => this.handleOnHide(true, reason)
+				};
+				this.pickOpenWidget.setCallbacks(callbacks);
 
 				// Set input
 				if (!this.pickOpenWidget.isVisible()) {
 					this.pickOpenWidget.show(model, { autoFocus });
 				} else {
 					this.pickOpenWidget.setInput(model, autoFocus);
+				}
+
+				// The user might have typed something (or options.value was set) so we need to play back
+				// the input box value through our callbacks to filter the result accordingly.
+				const inputValue = this.pickOpenWidget.getInputBox().value;
+				if (inputValue) {
+					callbacks.onType(inputValue);
 				}
 			}, (err) => {
 				this.pickOpenWidget.hide();
@@ -766,7 +795,7 @@ export class QuickOpenController extends WorkbenchComponent implements IQuickOpe
 		history.forEach(input => {
 			let resource: URI;
 			if (input instanceof EditorInput) {
-				resource = getUntitledOrFileResource(input);
+				resource = toResource(input, { filter: ['file', 'untitled'] });
 			} else {
 				resource = (input as IResourceInput).resource;
 			}
@@ -985,6 +1014,7 @@ class PickOpenEntry extends PlaceholderQuickOpenEntry {
 
 	constructor(
 		item: IPickOpenEntry,
+		private _index: number,
 		private onPreview: () => void,
 		@IModeService private modeService: IModeService,
 		@IModelService private modelService: IModelService
@@ -1000,6 +1030,10 @@ class PickOpenEntry extends PlaceholderQuickOpenEntry {
 		const fileItem = <IFilePickOpenEntry>item;
 		this.resource = fileItem.resource;
 		this.isFolder = fileItem.isFolder;
+	}
+
+	public get index(): number {
+		return this._index;
 	}
 
 	public getLabelOptions(): IIconLabelOptions {
@@ -1072,7 +1106,7 @@ export class EditorHistoryEntry extends EditorQuickOpenEntry {
 		this.input = input;
 
 		if (input instanceof EditorInput) {
-			this.resource = getUntitledOrFileResource(input);
+			this.resource = toResource(input, { filter: ['file', 'untitled'] });
 			this.label = input.getName();
 			this.description = input.getDescription();
 			this.dirty = input.isDirty();

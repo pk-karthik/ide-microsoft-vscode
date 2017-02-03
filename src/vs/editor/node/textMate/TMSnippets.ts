@@ -14,6 +14,7 @@ import { ISnippetsRegistry, Extensions, ISnippet } from 'vs/editor/common/modes/
 import { IModeService } from 'vs/editor/common/services/modeService';
 import platform = require('vs/platform/platform');
 import { languagesExtPoint } from 'vs/editor/common/services/modeServiceImpl';
+import { LanguageIdentifier } from 'vs/editor/common/modes';
 
 export interface ISnippetsExtensionPoint {
 	language: string;
@@ -26,7 +27,7 @@ let snippetsExtensionPoint = ExtensionsRegistry.registerExtensionPoint<ISnippets
 	defaultSnippets: [{ body: [{ language: '', path: '' }] }],
 	items: {
 		type: 'object',
-		defaultSnippets: [{ body: { language: '{{id}}', path: './snippets/{{id}}.json.' } }],
+		defaultSnippets: [{ body: { language: '${1:id}', path: './snippets/${2:id}.json.' } }],
 		properties: {
 			language: {
 				description: nls.localize('vscode.extension.contributes.snippets-language', 'Language identifier for which this snippet is contributed to.'),
@@ -72,22 +73,25 @@ export class MainProcessTextMateSnippet {
 		}
 
 		let modeId = snippet.language;
-		let disposable = this._modeService.onDidCreateMode(mode => {
-			if (mode.getId() !== modeId) {
-				return;
-			}
-			readAndRegisterSnippets(modeId, normalizedAbsolutePath, extensionName);
-			disposable.dispose();
-		});
+		let languageIdentifier = this._modeService.getLanguageIdentifier(modeId);
+		if (languageIdentifier) {
+			let disposable = this._modeService.onDidCreateMode(mode => {
+				if (mode.getId() !== modeId) {
+					return;
+				}
+				readAndRegisterSnippets(languageIdentifier, normalizedAbsolutePath, extensionName);
+				disposable.dispose();
+			});
+		}
 	}
 }
 
 let snippetsRegistry = <ISnippetsRegistry>platform.Registry.as(Extensions.Snippets);
 
-export function readAndRegisterSnippets(modeId: string, filePath: string, ownerName: string): TPromise<void> {
+export function readAndRegisterSnippets(languageIdentifier: LanguageIdentifier, filePath: string, ownerName: string): TPromise<void> {
 	return readFile(filePath).then(fileContents => {
 		let snippets = parseSnippetFile(fileContents.toString(), ownerName);
-		snippetsRegistry.registerSnippets(modeId, snippets, filePath);
+		snippetsRegistry.registerSnippets(languageIdentifier, snippets, filePath);
 	});
 }
 

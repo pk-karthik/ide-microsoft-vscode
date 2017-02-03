@@ -25,7 +25,7 @@ import { IPeekViewService } from 'vs/editor/contrib/zoneWidget/browser/peekViewW
 import { ReferencesModel, OneReference } from './referencesModel';
 import { ReferenceWidget, LayoutData } from './referencesWidget';
 import { Range } from 'vs/editor/common/core/range';
-import { ITextModelResolverService } from 'vs/platform/textmodelResolver/common/resolver';
+import { ITextModelResolverService } from 'vs/editor/common/services/resolverService';
 
 export const ctxReferenceSearchVisible = new RawContextKey<boolean>('referenceSearchVisible', false);
 
@@ -96,7 +96,7 @@ export class ReferencesController implements editorCommon.IEditorContribution {
 		this._referenceSearchVisible.set(true);
 
 		// close the widget on model/mode changes
-		this._disposables.push(this._editor.onDidChangeModelMode(() => { this.closeWidget(); }));
+		this._disposables.push(this._editor.onDidChangeModelLanguage(() => { this.closeWidget(); }));
 		this._disposables.push(this._editor.onDidChangeModel(() => {
 			if (!this._ignoreModelChangeEvent) {
 				this.closeWidget();
@@ -145,8 +145,13 @@ export class ReferencesController implements editorCommon.IEditorContribution {
 
 			// still current request? widget still open?
 			if (requestId !== this._requestIdPool || !this._widget) {
-				return;
+				return undefined;
 			}
+
+			if (this._model) {
+				this._model.dispose();
+			}
+
 			this._model = model;
 
 			// measure time it stays open
@@ -173,6 +178,7 @@ export class ReferencesController implements editorCommon.IEditorContribution {
 				if (selection) {
 					return this._widget.setSelection(selection);
 				}
+				return undefined;
 			});
 
 		}, error => {
@@ -183,7 +189,7 @@ export class ReferencesController implements editorCommon.IEditorContribution {
 
 		onDone(duration => this._telemetryService.publicLog('findReferences', {
 			duration,
-			mode: this._editor.getModel().getMode().getId()
+			mode: this._editor.getModel().getLanguageIdentifier().language
 		}));
 	}
 
@@ -194,12 +200,17 @@ export class ReferencesController implements editorCommon.IEditorContribution {
 		}
 		this._referenceSearchVisible.reset();
 		this._disposables = dispose(this._disposables);
-		this._model = null;
+		if (this._model) {
+			this._model.dispose();
+			this._model = null;
+		}
 		this._editor.focus();
 		this._requestIdPool += 1; // Cancel pending requests
 	}
 
 	private _gotoReference(ref: OneReference): void {
+		this._widget.hide();
+
 		this._ignoreModelChangeEvent = true;
 		const {uri, range} = ref;
 

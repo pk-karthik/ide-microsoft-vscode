@@ -14,7 +14,7 @@ import fs = require('fs');
 import uuid = require('vs/base/common/uuid');
 import strings = require('vs/base/common/strings');
 import extfs = require('vs/base/node/extfs');
-import { onError } from 'vs/test/utils/servicesTestUtils';
+import { onError } from 'vs/base/test/common/utils';
 
 suite('Extfs', () => {
 
@@ -31,6 +31,59 @@ suite('Extfs', () => {
 			assert.ok(fs.existsSync(newDir));
 
 			extfs.del(parentDir, os.tmpdir(), () => { }, done);
+		}); // 493 = 0755
+	});
+
+	test('delSync - swallows file not found error', function () {
+		const id = uuid.generateUuid();
+		const parentDir = path.join(os.tmpdir(), 'vsctests', id);
+		const newDir = path.join(parentDir, 'extfs', id);
+
+		extfs.delSync(newDir);
+
+		assert.ok(!fs.existsSync(newDir));
+	});
+
+	test('delSync - simple', function (done: () => void) {
+		const id = uuid.generateUuid();
+		const parentDir = path.join(os.tmpdir(), 'vsctests', id);
+		const newDir = path.join(parentDir, 'extfs', id);
+
+		extfs.mkdirp(newDir, 493, (error) => {
+			if (error) {
+				return onError(error, done);
+			}
+
+			fs.writeFileSync(path.join(newDir, 'somefile.txt'), 'Contents');
+			fs.writeFileSync(path.join(newDir, 'someOtherFile.txt'), 'Contents');
+
+			extfs.delSync(newDir);
+
+			assert.ok(!fs.existsSync(newDir));
+			done();
+		}); // 493 = 0755
+	});
+
+	test('delSync - recursive folder structure', function (done: () => void) {
+		const id = uuid.generateUuid();
+		const parentDir = path.join(os.tmpdir(), 'vsctests', id);
+		const newDir = path.join(parentDir, 'extfs', id);
+
+		extfs.mkdirp(newDir, 493, (error) => {
+			if (error) {
+				return onError(error, done);
+			}
+
+			fs.writeFileSync(path.join(newDir, 'somefile.txt'), 'Contents');
+			fs.writeFileSync(path.join(newDir, 'someOtherFile.txt'), 'Contents');
+
+			fs.mkdirSync(path.join(newDir, 'somefolder'));
+			fs.writeFileSync(path.join(newDir, 'somefolder', 'somefile.txt'), 'Contents');
+
+			extfs.delSync(newDir);
+
+			assert.ok(!fs.existsSync(newDir));
+			done();
 		}); // 493 = 0755
 	});
 
@@ -144,7 +197,7 @@ suite('Extfs', () => {
 
 					assert.equal(fs.readFileSync(testFile), largeString);
 
-					done();
+					extfs.del(parentDir, os.tmpdir(), () => { }, done);
 				});
 			});
 		});

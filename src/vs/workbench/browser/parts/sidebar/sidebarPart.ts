@@ -13,7 +13,7 @@ import { Viewlet, ViewletRegistry, Extensions as ViewletExtensions } from 'vs/wo
 import { IWorkbenchActionRegistry, Extensions as ActionExtensions } from 'vs/workbench/common/actionRegistry';
 import { SyncActionDescriptor } from 'vs/platform/actions/common/actions';
 import { IViewletService } from 'vs/workbench/services/viewlet/browser/viewlet';
-import { IPartService } from 'vs/workbench/services/part/common/partService';
+import { IPartService, Parts } from 'vs/workbench/services/part/common/partService';
 import { IViewlet } from 'vs/workbench/common/viewlet';
 import { Scope } from 'vs/workbench/browser/actionBarRegistry';
 import { IStorageService } from 'vs/platform/storage/common/storage';
@@ -25,16 +25,7 @@ import { KeyMod, KeyCode } from 'vs/base/common/keyCodes';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import Event from 'vs/base/common/event';
 
-export interface ISidebar {
-	onDidViewletOpen: Event<IViewlet>;
-	onDidViewletClose: Event<IViewlet>;
-	openViewlet(id: string, focus?: boolean): TPromise<IViewlet>;
-	getActiveViewlet(): IViewlet;
-	getLastActiveViewletId(): string;
-	hideActiveViewlet(): TPromise<void>;
-}
-
-export class SidebarPart extends CompositePart<Viewlet> implements ISidebar {
+export class SidebarPart extends CompositePart<Viewlet> {
 
 	public static activeViewletSettingsKey = 'workbench.sidebar.activeviewletid';
 
@@ -60,12 +51,13 @@ export class SidebarPart extends CompositePart<Viewlet> implements ISidebar {
 			partService,
 			keybindingService,
 			instantiationService,
-			(<ViewletRegistry>Registry.as(ViewletExtensions.Viewlets)),
+			Registry.as<ViewletRegistry>(ViewletExtensions.Viewlets),
 			SidebarPart.activeViewletSettingsKey,
 			'sideBar',
 			'viewlet',
 			Scope.VIEWLET,
-			id
+			id,
+			{ hasTitle: true }
 		);
 	}
 
@@ -83,16 +75,17 @@ export class SidebarPart extends CompositePart<Viewlet> implements ISidebar {
 		}
 
 		// First check if sidebar is hidden and show if so
-		if (this.partService.isSideBarHidden()) {
+		let promise = TPromise.as(null);
+		if (!this.partService.isVisible(Parts.SIDEBAR_PART)) {
 			try {
 				this.blockOpeningViewlet = true;
-				this.partService.setSideBarHidden(false);
+				promise = this.partService.setSideBarHidden(false);
 			} finally {
 				this.blockOpeningViewlet = false;
 			}
 		}
 
-		return this.openComposite(id, focus);
+		return promise.then(() => this.openComposite(id, focus));
 	}
 
 	public getActiveViewlet(): IViewlet {
@@ -122,26 +115,23 @@ class FocusSideBarAction extends Action {
 		super(id, label);
 	}
 
-	public run(): TPromise<boolean> {
+	public run(): TPromise<any> {
 
 		// Show side bar
-		if (this.partService.isSideBarHidden()) {
-			this.partService.setSideBarHidden(false);
+		if (!this.partService.isVisible(Parts.SIDEBAR_PART)) {
+			return this.partService.setSideBarHidden(false);
 		}
 
 		// Focus into active viewlet
-		else {
-			let viewlet = this.viewletService.getActiveViewlet();
-			if (viewlet) {
-				viewlet.focus();
-			}
+		let viewlet = this.viewletService.getActiveViewlet();
+		if (viewlet) {
+			viewlet.focus();
 		}
-
 		return TPromise.as(true);
 	}
 }
 
-let registry = <IWorkbenchActionRegistry>Registry.as(ActionExtensions.WorkbenchActions);
+const registry = Registry.as<IWorkbenchActionRegistry>(ActionExtensions.WorkbenchActions);
 registry.registerWorkbenchAction(new SyncActionDescriptor(FocusSideBarAction, FocusSideBarAction.ID, FocusSideBarAction.LABEL, {
 	primary: KeyMod.CtrlCmd | KeyCode.KEY_0
 }), 'View: Focus into Side Bar', nls.localize('viewCategory', "View"));

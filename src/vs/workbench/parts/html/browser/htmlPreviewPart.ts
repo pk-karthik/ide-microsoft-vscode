@@ -10,7 +10,7 @@ import URI from 'vs/base/common/uri';
 import { TPromise } from 'vs/base/common/winjs.base';
 import { IModel } from 'vs/editor/common/editorCommon';
 import { Dimension, Builder } from 'vs/base/browser/builder';
-import { empty as EmptyDisposable, IDisposable, dispose } from 'vs/base/common/lifecycle';
+import { empty as EmptyDisposable, IDisposable, dispose, IReference } from 'vs/base/common/lifecycle';
 import { EditorOptions, EditorInput } from 'vs/workbench/common/editor';
 import { BaseEditor } from 'vs/workbench/browser/parts/editor/baseEditor';
 import { Position } from 'vs/platform/editor/common/editor';
@@ -20,7 +20,8 @@ import { BaseTextEditorModel } from 'vs/workbench/common/editor/textEditorModel'
 import { HtmlInput } from 'vs/workbench/parts/html/common/htmlInput';
 import { IThemeService } from 'vs/workbench/services/themes/common/themeService';
 import { IOpenerService } from 'vs/platform/opener/common/opener';
-import { ITextModelResolverService } from 'vs/platform/textmodelResolver/common/resolver';
+import { ITextModelResolverService, ITextEditorModel } from 'vs/editor/common/services/resolverService';
+
 import Webview from './webview';
 
 /**
@@ -39,7 +40,8 @@ export class HtmlPreviewPart extends BaseEditor {
 
 	private _baseUrl: URI;
 
-	private _model: IModel;
+	private _modelRef: IReference<ITextEditorModel>;
+	public get model(): IModel { return this._modelRef && this._modelRef.object.textEditorModel; }
 	private _modelChangeSubscription = EmptyDisposable;
 	private _themeChangeSubscription = EmptyDisposable;
 
@@ -65,11 +67,13 @@ export class HtmlPreviewPart extends BaseEditor {
 		// unhook listeners
 		this._themeChangeSubscription.dispose();
 		this._modelChangeSubscription.dispose();
-		this._model = undefined;
+
+		// dipose model ref
+		dispose(this._modelRef);
 		super.dispose();
 	}
 
-	public createEditor(parent: Builder): void {
+	protected createEditor(parent: Builder): void {
 		this._container = document.createElement('div');
 		this._container.style.paddingLeft = '20px';
 		parent.getHTMLElement().appendChild(this._container);
@@ -77,7 +81,7 @@ export class HtmlPreviewPart extends BaseEditor {
 
 	private get webview(): Webview {
 		if (!this._webview) {
-			this._webview = new Webview(this._container, document.querySelector('.monaco-editor-background'));
+			this._webview = new Webview(this._container, document.querySelector('.monaco-editor-background'), { nodeintegration: true });
 			this._webview.baseUrl = this._baseUrl && this._baseUrl.toString(true);
 
 			this._webviewDisposables = [
@@ -98,7 +102,7 @@ export class HtmlPreviewPart extends BaseEditor {
 		super.changePosition(position);
 	}
 
-	public setEditorVisible(visible: boolean, position?: Position): void {
+	protected setEditorVisible(visible: boolean, position?: Position): void {
 		this._doSetVisible(visible);
 		super.setEditorVisible(visible, position);
 	}
@@ -114,14 +118,14 @@ export class HtmlPreviewPart extends BaseEditor {
 			this.webview.style(this._themeService.getColorTheme());
 
 			if (this._hasValidModel()) {
-				this._modelChangeSubscription = this._model.onDidChangeContent(() => this.webview.contents = this._model.getLinesContent());
-				this.webview.contents = this._model.getLinesContent();
+				this._modelChangeSubscription = this.model.onDidChangeContent(() => this.webview.contents = this.model.getLinesContent());
+				this.webview.contents = this.model.getLinesContent();
 			}
 		}
 	}
 
 	private _hasValidModel(): boolean {
-		return this._model && !this._model.isDisposed();
+		return this._modelRef && this.model && !this.model.isDisposed();
 	}
 
 	public layout(dimension: Dimension): void {
@@ -135,13 +139,25 @@ export class HtmlPreviewPart extends BaseEditor {
 		this.webview.focus();
 	}
 
-	public setInput(input: EditorInput, options: EditorOptions): TPromise<void> {
+	public clearInput(): void {
+		dispose(this._modelRef);
+		this._modelRef = undefined;
+		super.clearInput();
+	}
 
-		if (this.input === input && this._hasValidModel()) {
+	public sendMessage(data: any): void {
+		this.webview.sendMessage(data);
+	}
+
+	public setInput(input: EditorInput, options?: EditorOptions): TPromise<void> {
+
+		if (this.input && this.input.matches(input) && this._hasValidModel()) {
 			return TPromise.as(undefined);
 		}
 
-		this._model = undefined;
+		if (this._modelRef) {
+			this._modelRef.dispose();
+		}
 		this._modelChangeSubscription.dispose();
 
 		if (!(input instanceof HtmlInput)) {
@@ -149,17 +165,23 @@ export class HtmlPreviewPart extends BaseEditor {
 		}
 
 		return super.setInput(input, options).then(() => {
-			let resourceUri = (<HtmlInput>input).getResource();
-			return this._textModelResolverService.resolve(resourceUri).then(model => {
+			const resourceUri = input.getResource();
+			return this._textModelResolverService.createModelReference(resourceUri).then(ref => {
+				const model = ref.object;
+
 				if (model instanceof BaseTextEditorModel) {
-					this._model = model.textEditorModel;
+					this._modelRef = ref;
 				}
-				if (!this._model) {
+
+				if (!this.model) {
 					return TPromise.wrapError<void>(localize('html.voidInput', "Invalid editor input."));
 				}
-				this._modelChangeSubscription = this._model.onDidChangeContent(() => this.webview.contents = this._model.getLinesContent());
+
+				this._modelChangeSubscription = this.model.onDidChangeContent(() => this.webview.contents = this.model.getLinesContent());
 				this.webview.baseUrl = resourceUri.toString(true);
-				this.webview.contents = this._model.getLinesContent();
+				this.webview.contents = this.model.getLinesContent();
+
+				return undefined;
 			});
 		});
 	}

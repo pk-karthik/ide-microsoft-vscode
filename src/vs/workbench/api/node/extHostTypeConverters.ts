@@ -111,7 +111,7 @@ export function fromViewColumn(column?: vscode.ViewColumn): EditorPosition {
 
 export function toViewColumn(position?: EditorPosition): vscode.ViewColumn {
 	if (typeof position !== 'number') {
-		return;
+		return undefined;
 	}
 	if (position === EditorPosition.ONE) {
 		return <number>types.ViewColumn.One;
@@ -120,6 +120,7 @@ export function toViewColumn(position?: EditorPosition): vscode.ViewColumn {
 	} else if (position === EditorPosition.THREE) {
 		return <number>types.ViewColumn.Three;
 	}
+	return undefined;
 }
 
 function isDecorationOptions(something: any): something is vscode.DecorationOptions {
@@ -257,6 +258,7 @@ export const CompletionItemKind = {
 			case types.CompletionItemKind.Color: return 'color';
 			case types.CompletionItemKind.File: return 'file';
 			case types.CompletionItemKind.Reference: return 'reference';
+			case types.CompletionItemKind.Folder: return 'folder';
 		}
 		return 'property';
 	},
@@ -270,23 +272,9 @@ export const CompletionItemKind = {
 	}
 };
 
-export const Suggest = {
+export namespace Suggest {
 
-	from(item: vscode.CompletionItem): modes.ISuggestion {
-		const suggestion: modes.ISuggestion = {
-			label: item.label || '<missing label>',
-			insertText: item.insertText || item.label,
-			type: CompletionItemKind.from(item.kind),
-			detail: item.detail,
-			documentation: item.documentation,
-			sortText: item.sortText,
-			filterText: item.filterText,
-			additionalTextEdits: item.additionalTextEdits && item.additionalTextEdits.map(TextEdit.from)
-		};
-		return suggestion;
-	},
-
-	to(position: types.Position, suggestion: modes.ISuggestion): types.CompletionItem {
+	export function to(position: types.Position, suggestion: modes.ISuggestion): types.CompletionItem {
 		const result = new types.CompletionItem(suggestion.label);
 		result.insertText = suggestion.insertText;
 		result.kind = CompletionItemKind.to(suggestion.type);
@@ -295,14 +283,25 @@ export const Suggest = {
 		result.sortText = suggestion.sortText;
 		result.filterText = suggestion.filterText;
 
+		// 'overwrite[Before|After]'-logic
 		let overwriteBefore = (typeof suggestion.overwriteBefore === 'number') ? suggestion.overwriteBefore : 0;
 		let startPosition = new types.Position(position.line, Math.max(0, position.character - overwriteBefore));
 		let endPosition = position;
 		if (typeof suggestion.overwriteAfter === 'number') {
 			endPosition = new types.Position(position.line, position.character + suggestion.overwriteAfter);
 		}
+		result.range = new types.Range(startPosition, endPosition);
 
-		result.textEdit = types.TextEdit.replace(new types.Range(startPosition, endPosition), suggestion.insertText);
+		// 'inserText'-logic
+		if (suggestion.snippetType === 'textmate') {
+			result.insertText = new types.SnippetString(suggestion.insertText);
+		} else {
+			result.insertText = suggestion.insertText;
+			result.textEdit = new types.TextEdit(result.range, result.insertText);
+		}
+
+		// TODO additionalEdits, command
+
 		return result;
 	}
 };

@@ -6,11 +6,11 @@
 
 import { sequence, asWinJsPromise } from 'vs/base/common/async';
 import { isFalsyOrEmpty } from 'vs/base/common/arrays';
-import { compare } from 'vs/base/common/strings';
+import { compareIgnoreCase } from 'vs/base/common/strings';
 import { assign } from 'vs/base/common/objects';
-import { onUnexpectedError } from 'vs/base/common/errors';
+import { onUnexpectedExternalError } from 'vs/base/common/errors';
 import { TPromise } from 'vs/base/common/winjs.base';
-import { IReadOnlyModel, IPosition } from 'vs/editor/common/editorCommon';
+import { IModel, IPosition } from 'vs/editor/common/editorCommon';
 import { CommonEditorRegistry } from 'vs/editor/common/editorCommonExtensions';
 import { ISuggestResult, ISuggestSupport, ISuggestion, SuggestRegistry } from 'vs/editor/common/modes';
 import { ISnippetsRegistry, Extensions } from 'vs/editor/common/modes/snippetsRegistry';
@@ -42,15 +42,16 @@ export const snippetSuggestSupport: ISuggestSupport = {
 
 	triggerCharacters: [],
 
-	provideCompletionItems(model: IReadOnlyModel, position: Position): ISuggestResult {
+	provideCompletionItems(model: IModel, position: Position): ISuggestResult {
 		const suggestions = Registry.as<ISnippetsRegistry>(Extensions.Snippets).getSnippetCompletions(model, position);
 		if (suggestions) {
 			return { suggestions };
 		}
+		return undefined;
 	}
 };
 
-export function provideSuggestionItems(model: IReadOnlyModel, position: Position, snippetConfig: SnippetConfig = 'bottom', onlyFrom?: ISuggestSupport[]): TPromise<ISuggestionItem[]> {
+export function provideSuggestionItems(model: IModel, position: Position, snippetConfig: SnippetConfig = 'bottom', onlyFrom?: ISuggestSupport[]): TPromise<ISuggestionItem[]> {
 
 	const allSuggestions: ISuggestionItem[] = [];
 	const acceptSuggestion = createSuggesionFilter(snippetConfig);
@@ -72,13 +73,13 @@ export function provideSuggestionItems(model: IReadOnlyModel, position: Position
 		return () => {
 			// stop when we have a result
 			if (hasResult) {
-				return;
+				return undefined;
 			}
 			// for each support in the group ask for suggestions
 			return TPromise.join(supports.map(support => {
 
 				if (!isFalsyOrEmpty(onlyFrom) && onlyFrom.indexOf(support) < 0) {
-					return;
+					return undefined;
 				}
 
 				return asWinJsPromise(token => support.provideCompletionItems(model, position, token)).then(container => {
@@ -106,7 +107,7 @@ export function provideSuggestionItems(model: IReadOnlyModel, position: Position
 						hasResult = true;
 					}
 
-				}, onUnexpectedError);
+				}, onUnexpectedExternalError);
 			}));
 		};
 	});
@@ -132,7 +133,7 @@ function fixOverwriteBeforeAfter(suggestion: ISuggestion, container: ISuggestRes
 	}
 }
 
-function createSuggestionResolver(provider: ISuggestSupport, suggestion: ISuggestion, model: IReadOnlyModel, position: Position): () => TPromise<void> {
+function createSuggestionResolver(provider: ISuggestSupport, suggestion: ISuggestion, model: IModel, position: Position): () => TPromise<void> {
 	return () => {
 		if (typeof provider.resolveCompletionItem === 'function') {
 			return asWinJsPromise(token => provider.resolveCompletionItem(model, position, suggestion, token))
@@ -149,57 +150,55 @@ function createSuggesionFilter(snippetConfig: SnippetConfig): (candidate: ISugge
 		return () => true;
 	}
 }
+function defaultComparator(a: ISuggestionItem, b: ISuggestionItem): number {
+
+	let ret = 0;
+
+	// check with 'sortText'
+	if (typeof a.suggestion.sortText === 'string' && typeof b.suggestion.sortText === 'string') {
+		ret = compareIgnoreCase(a.suggestion.sortText, b.suggestion.sortText);
+	}
+
+	// check with 'label'
+	if (ret === 0) {
+		ret = compareIgnoreCase(a.suggestion.label, b.suggestion.label);
+	}
+
+	// check with 'type' and lower snippets
+	if (ret === 0 && a.suggestion.type !== b.suggestion.type) {
+		if (a.suggestion.type === 'snippet') {
+			ret = 1;
+		} else if (b.suggestion.type === 'snippet') {
+			ret = -1;
+		}
+	}
+
+	return ret;
+}
+
+function snippetUpComparator(a: ISuggestionItem, b: ISuggestionItem): number {
+	if (a.suggestion.type !== b.suggestion.type) {
+		if (a.suggestion.type === 'snippet') {
+			return -1;
+		} else if (b.suggestion.type === 'snippet') {
+			return 1;
+		}
+	}
+	return defaultComparator(a, b);
+}
+
+function snippetDownComparator(a: ISuggestionItem, b: ISuggestionItem): number {
+	if (a.suggestion.type !== b.suggestion.type) {
+		if (a.suggestion.type === 'snippet') {
+			return 1;
+		} else if (b.suggestion.type === 'snippet') {
+			return -1;
+		}
+	}
+	return defaultComparator(a, b);
+}
 
 export function getSuggestionComparator(snippetConfig: SnippetConfig): (a: ISuggestionItem, b: ISuggestionItem) => number {
-
-	function defaultComparator(a: ISuggestionItem, b: ISuggestionItem): number {
-
-		let ret = 0;
-
-		// check with 'sortText'
-		if (typeof a.suggestion.sortText === 'string' && typeof b.suggestion.sortText === 'string') {
-			ret = compare(a.suggestion.sortText.toLowerCase(), b.suggestion.sortText.toLowerCase());
-		}
-
-		// check with 'label'
-		if (!ret) {
-			ret = compare(a.suggestion.label.toLowerCase(), b.suggestion.label.toLowerCase());
-		}
-
-		// check with 'type' and lower snippets
-		if (!ret && a.suggestion.type !== b.suggestion.type) {
-			if (a.suggestion.type === 'snippet') {
-				ret = 1;
-			} else if (b.suggestion.type === 'snippet') {
-				ret = -1;
-			}
-		}
-
-		return ret;
-	}
-
-	function snippetUpComparator(a: ISuggestionItem, b: ISuggestionItem): number {
-		if (a.suggestion.type !== b.suggestion.type) {
-			if (a.suggestion.type === 'snippet') {
-				return -1;
-			} else if (b.suggestion.type === 'snippet') {
-				return 1;
-			}
-		}
-		return defaultComparator(a, b);
-	}
-
-	function snippetDownComparator(a: ISuggestionItem, b: ISuggestionItem): number {
-		if (a.suggestion.type !== b.suggestion.type) {
-			if (a.suggestion.type === 'snippet') {
-				return 1;
-			} else if (b.suggestion.type === 'snippet') {
-				return -1;
-			}
-		}
-		return defaultComparator(a, b);
-	}
-
 	if (snippetConfig === 'top') {
 		return snippetUpComparator;
 	} else if (snippetConfig === 'bottom') {

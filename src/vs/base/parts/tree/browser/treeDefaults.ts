@@ -14,7 +14,7 @@ import dom = require('vs/base/browser/dom');
 import mouse = require('vs/base/browser/mouseEvent');
 import { IKeyboardEvent } from 'vs/base/browser/keyboardEvent';
 import _ = require('vs/base/parts/tree/browser/tree');
-import { KeyCode, KeyMod } from 'vs/base/common/keyCodes';
+import { Keybinding, KeyCode, KeyMod } from 'vs/base/common/keyCodes';
 
 export interface ILegacyTemplateData {
 	root: HTMLElement;
@@ -115,11 +115,11 @@ export class KeybindingDispatcher {
 		});
 	}
 
-	public dispatch(keybinding: number): IKeyBindingCallback {
+	public dispatch(keybinding: Keybinding): IKeyBindingCallback {
 		// Loop from the last to the first to handle overwrites
 		for (let i = this._arr.length - 1; i >= 0; i--) {
 			let item = this._arr[i];
-			if (keybinding === item.keybinding) {
+			if (keybinding.value === item.keybinding) {
 				return item.callback;
 			}
 		}
@@ -144,8 +144,13 @@ export class DefaultController implements _.IController {
 		this.downKeyBindingDispatcher.set(KeyCode.DownArrow, (t, e) => this.onDown(t, e));
 		this.downKeyBindingDispatcher.set(KeyCode.PageDown, (t, e) => this.onPageDown(t, e));
 		this.downKeyBindingDispatcher.set(KeyCode.LeftArrow, (t, e) => this.onLeft(t, e));
+		if (platform.isMacintosh) {
+			this.downKeyBindingDispatcher.set(KeyMod.CtrlCmd | KeyCode.UpArrow, (t, e) => this.onLeft(t, e));
+		}
 		this.downKeyBindingDispatcher.set(KeyCode.RightArrow, (t, e) => this.onRight(t, e));
 		this.downKeyBindingDispatcher.set(KeyCode.Escape, (t, e) => this.onEscape(t, e));
+		this.downKeyBindingDispatcher.set(KeyCode.Home, (t, e) => this.onHome(t, e));
+		this.downKeyBindingDispatcher.set(KeyCode.End, (t, e) => this.onEnd(t, e));
 
 		this.upKeyBindingDispatcher = new KeybindingDispatcher();
 		this.upKeyBindingDispatcher.set(KeyCode.Enter, this.onEnter.bind(this));
@@ -153,7 +158,7 @@ export class DefaultController implements _.IController {
 	}
 
 	public onMouseDown(tree: _.ITree, element: any, event: mouse.IMouseEvent, origin: string = 'mouse'): boolean {
-		if (this.options.clickBehavior === ClickBehavior.ON_MOUSE_DOWN && event.leftButton) {
+		if (this.options.clickBehavior === ClickBehavior.ON_MOUSE_DOWN && (event.leftButton || event.middleButton)) {
 			if (event.target) {
 				if (event.target.tagName && event.target.tagName.toLowerCase() === 'input') {
 					return false; // Ignore event if target is a form input field (avoids browser specific issues)
@@ -181,15 +186,11 @@ export class DefaultController implements _.IController {
 			return false;
 		}
 
-		if (event.middleButton) {
-			return false; // Give contents of the item a chance to handle this (e.g. open link in new tab)
-		}
-
 		if (event.target && event.target.tagName && event.target.tagName.toLowerCase() === 'input') {
 			return false; // Ignore event if target is a form input field (avoids browser specific issues)
 		}
 
-		if (this.options.clickBehavior === ClickBehavior.ON_MOUSE_DOWN && event.leftButton) {
+		if (this.options.clickBehavior === ClickBehavior.ON_MOUSE_DOWN && (event.leftButton || event.middleButton)) {
 			return false; // Already handled by onMouseDown
 		}
 
@@ -256,7 +257,7 @@ export class DefaultController implements _.IController {
 	}
 
 	private onKey(bindings: KeybindingDispatcher, tree: _.ITree, event: IKeyboardEvent): boolean {
-		var handler = bindings.dispatch(event.asKeybinding());
+		var handler = bindings.dispatch(event.toKeybinding());
 		if (handler) {
 			if (handler(tree, event)) {
 				event.preventDefault();
@@ -315,6 +316,30 @@ export class DefaultController implements _.IController {
 		return true;
 	}
 
+	protected onHome(tree: _.ITree, event: IKeyboardEvent): boolean {
+		var payload = { origin: 'keyboard', originalEvent: event };
+
+		if (tree.getHighlight()) {
+			tree.clearHighlight(payload);
+		} else {
+			tree.focusFirst(payload);
+			tree.reveal(tree.getFocus()).done(null, errors.onUnexpectedError);
+		}
+		return true;
+	}
+
+	protected onEnd(tree: _.ITree, event: IKeyboardEvent): boolean {
+		var payload = { origin: 'keyboard', originalEvent: event };
+
+		if (tree.getHighlight()) {
+			tree.clearHighlight(payload);
+		} else {
+			tree.focusLast(payload);
+			tree.reveal(tree.getFocus()).done(null, errors.onUnexpectedError);
+		}
+		return true;
+	}
+
 	protected onLeft(tree: _.ITree, event: IKeyboardEvent): boolean {
 		var payload = { origin: 'keyboard', originalEvent: event };
 
@@ -327,6 +352,7 @@ export class DefaultController implements _.IController {
 					tree.focusParent(payload);
 					return tree.reveal(tree.getFocus());
 				}
+				return undefined;
 			}).done(null, errors.onUnexpectedError);
 		}
 		return true;
@@ -344,6 +370,7 @@ export class DefaultController implements _.IController {
 					tree.focusFirstChild(payload);
 					return tree.reveal(tree.getFocus());
 				}
+				return undefined;
 			}).done(null, errors.onUnexpectedError);
 		}
 		return true;

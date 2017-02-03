@@ -8,7 +8,6 @@ import 'vs/css!./quickopen';
 import nls = require('vs/nls');
 import { TPromise } from 'vs/base/common/winjs.base';
 import platform = require('vs/base/common/platform');
-import browser = require('vs/base/browser/browser');
 import { EventType } from 'vs/base/common/events';
 import types = require('vs/base/common/types');
 import errors = require('vs/base/common/errors');
@@ -182,11 +181,6 @@ export class QuickOpenWidget implements IModelProvider {
 							this.elementSelected(focus, e, shouldOpenInBackground ? Mode.OPEN_IN_BACKGROUND : Mode.OPEN);
 						}
 					}
-
-					// Bug in IE 9: onInput is not fired for Backspace or Delete keys
-					else if (browser.isIE9 && (keyboardEvent.keyCode === KeyCode.Backspace || keyboardEvent.keyCode === KeyCode.Delete)) {
-						this.onType();
-					}
 				});
 
 				DOM.addDisposableListener(this.inputBox.inputElement, DOM.EventType.INPUT, (e: Event) => {
@@ -301,7 +295,6 @@ export class QuickOpenWidget implements IModelProvider {
 
 			// Widget Attributes
 			.addClass('quick-open-widget')
-			.addClass((browser.isIE10orEarlier) ? ' no-shadow' : '')
 			.build(this.container);
 
 		// Support layout
@@ -340,12 +333,12 @@ export class QuickOpenWidget implements IModelProvider {
 		this.callbacks.onType(value);
 	}
 
-	public quickNavigate(configuration: IQuickNavigateConfiguration, next: boolean): void {
+	public navigate(next: boolean, quickNavigate?: IQuickNavigateConfiguration): void {
 		if (this.isVisible) {
 
 			// Transition into quick navigate mode if not yet done
 			if (!this.quickNavigateConfiguration) {
-				this.quickNavigateConfiguration = configuration;
+				this.quickNavigateConfiguration = quickNavigate;
 				this.tree.DOMFocus();
 			}
 
@@ -561,7 +554,7 @@ export class QuickOpenWidget implements IModelProvider {
 			const entryToFocus = caseSensitiveMatch || caseInsensitiveMatch;
 			if (entryToFocus) {
 				this.tree.setFocus(entryToFocus);
-				this.tree.reveal(entryToFocus, 0).done(null, errors.onUnexpectedError);
+				this.tree.reveal(entryToFocus, 0.5).done(null, errors.onUnexpectedError);
 
 				return;
 			}
@@ -570,7 +563,7 @@ export class QuickOpenWidget implements IModelProvider {
 		// Second check for auto focus of first entry
 		if (autoFocus.autoFocusFirstEntry) {
 			this.tree.focusFirst();
-			this.tree.reveal(this.tree.getFocus(), 0).done(null, errors.onUnexpectedError);
+			this.tree.reveal(this.tree.getFocus()).done(null, errors.onUnexpectedError);
 		}
 
 		// Third check for specific index option
@@ -796,6 +789,10 @@ export class QuickOpenWidget implements IModelProvider {
 
 	public getProgressBar(): ProgressBar {
 		return this.progressBar;
+	}
+
+	public getInputBox(): InputBox {
+		return this.inputBox;
 	}
 
 	public setExtraClass(clazz: string): void {
